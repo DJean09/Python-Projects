@@ -141,6 +141,9 @@ def GetFloat(msg, errorMsg):
     while True:
         try:
             amount = float(input(msg))
+            
+            if amount <= 0:
+                print("Please enter a number greater than 0")
         except ValueError:
             print(errorMsg)
             continue
@@ -156,6 +159,9 @@ def GetInt(msg, errorMsg):
     while True:
         try:
             amount = int(input(msg))
+            
+            if amount <= 0:
+                print("Please enter a number greater than 0")
         except ValueError:
             print(errorMsg)
             continue
