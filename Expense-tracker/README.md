@@ -6,8 +6,8 @@ This Python application prompts the user to input their payment frequency and am
 
 ## Features
 
-- **Prompt for payment details**: Users can enter how often they're paid and the amount.
-- **Savings plan**: Users can specify if they plan to save money, how much to save each month, and set a savings goal.
-- **Expense management**: Add, remove, and view expenses.
-- **Financial summaries**: View total expenses and see yearly balance.
-- **User-friendly menu**: Navigate through the application options easily.
+- **Prompt for payment details:** Users can enter how often they're paid and the amount.
+- **Savings plan:** Users can specify if they plan to save money, how much to save each month, and set a savings goal.
+- **Expense management:** Add, remove, and view expenses.
+- **Financial summaries:** View total expenses and see yearly balance.
+- **User-friendly menu:** Navigate through the application options easily.
