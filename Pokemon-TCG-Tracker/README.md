@@ -13,3 +13,6 @@ pip install pokemontcgsdk
 ```
 pip install opencv-contrib-python
 ```
+```
+pip install cvlib
+```

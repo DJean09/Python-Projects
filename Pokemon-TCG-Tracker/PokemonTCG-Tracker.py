@@ -25,15 +25,37 @@ import time                     # returns the CPU time of the current process
 # import cvlib as cv
 # from cvlib.object_detection import draw_bbox
 
-def calc_image_hashes(card_pool, save_to=None, hash_size=None):
+def calc_image_hashes(card_pool, hash_size=16):
     """
     Compare card on video with each card in the database and gives them a value
     Calculate perceptual hash (pHash) value for each cards in the database, 
     then store them if needed
-    [card_pool] pandas dataframe containing all card information
-    [save_to] path for the pickle file to be saved
+    [card_pool] folder containing all card images
     [hash_size] param for pHash algorithm
+    [return] dictionary of card hashes
     """
+    card_hashes = {}
+
+    for filename in os.listdir(card_pool):
+        if filename.endswith(('.png', '.jpg', '.jpeg')):
+            card_name = filename.split('.')[0]  # Extract the card name (e.g. "xy1-1")
+            img_path = os.path.join(card_pool, filename)
+
+            # load and preprocess image
+            img = cv2.imread(img_path)
+
+            # preprocessing steps like resizing and grayscaling
+            img = cv2.resize(img, (600, 400))
+            img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            thresh_val = 150 # adjust based on image quality
+            _, img_thresh = cv2.threshold(img_gray, thresh_val, 255, cv2.THRESH_BINARY)
+
+            # get image hash
+            hash_val = ih.phash(Image.fromarray(img_thresh), hash_size=hash_size)
+
+            card_hashes[card_name] = hash_val.hash.flatten()
+    
+    return card_hashes
 
 
 # www.pyimagesearch.com/2014/08/25/4-point-opencv-getperspective-transform-example/
@@ -44,6 +66,8 @@ def order_points(pts):
     the second entry is the top-right,
     third is the bottom-right,
     and the fourth is the bottom-left.
+    [pts] list of points
+    [return] ordered list of points
     """
     rect = np.zeros((4,2), dtype="float32")
 
@@ -112,6 +136,8 @@ def remove_glare(img):
     reduce the glaring in the image.
     Finds the area that has low saturation but high value,
     which is what a glare usually looks like
+    [img] source image
+    [return] image with reduced glare
     """
 
     img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
@@ -135,7 +161,158 @@ def remove_glare(img):
 
     return corrected
 
+def find_card(img, thresh_c=5, kernel_size=(3,3), size_thresh=10000):
+    """
+    find contours of all cards in the image
+    [img] source image
+    [thresh_c] value of the constant C for adaptive thresholding
+    [kernel_size] dimension of the kernel used for dilation and erosion
+    [size_thresh] threshold in pixels of the contour to be a candidate
+    [return] list of contours of the cards in the image
+    """
+    # pre-processing - grayscale, blurring, thresholding
+    img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img_blur = cv2.medianBlur(img_gray, 5)
+    img_thresh = cv2.adaptiveThreshold(img_blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 5, thresh_c)
+
+    # dilute the image, then erode them to remove minor noises
+    kernel = np.ones(kernel_size, np.uint8)
+    img_dilate = cv2.dilate(img_thresh, kernel, iterations=1)
+    img_erode = cv2.erode(img_dilate, kernel, iterations=1)
+
+    # find the contour
+    _, cnts, hier = cv2.findContours(img_erode, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if len(cnts) == 0:
+        return []
+    
+    # the hierarchy from cv2.findContours() is similar to a tree: 
+    # each node has an access to the parent, the first child their previous and next node
+    # using recursive search, find the uppermost contour in the hierarchy that satisfies the condition
+    # the candidate contour must be rectangle (has 4 points) and should be larger than a threshold
+    cnts_rect = []
+    stack = [(0, hier[0][0])]
+    while len(stack) > 0:
+        i_cnt, h = stack.pop()
+        i_next, i_prev, i_child, i_parent = h
+
+        if i_next != -1:
+            stack.append((i_next, hier[0][i_next]))
+        
+        cnt = cnt[i_cnt]
+        size = cv2.contourArea(cnt)
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+
+        if size >= size_thresh and len(approx) == 4:
+            cnts_rect.append(approx)
+        else:
+            if i_child != -1:
+                stack.append((i_child, hier[0][i_child]))
+        
+    return cnts_rect
+
+def detect_frame(frame, card_hashes, hash_size, api_base_url, api_key=None, display=False, debug=False, thresh_c=5, kernel_size=(3,3), size_thresh=10000):
+    """
+    identify all the cards in the input frame
+    [frame] input frame
+    [card_hashes] dictionary of card hashes
+    [hash_size] pHash hash size
+    [api_base_url] base URL for the
+    [api_key] API key for the Pokemon TCG API
+    [display] whether to display the result
+    [debug] whether to display debug information
+    [thresh_c] value of the constant C for adaptive thresholding
+    [kernel_size] dimension of the kernel used for dilation and erosion
+    [size_thresh] threshold in pixels of the contour to be a candidate
+    [return] list of detected cards
+    """
+    # Preprocessing the frame
+    frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    frame_blur = cv2.medianBlur(frame_gray, 5)
+    frame_thresh = cv2.adaptiveThreshold(frame_blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 5, thresh_c)
+
+    # Dilate and erode the image to remove minor noises
+    kernel = np.ones(kernel_size, np.uint8)
+    frame_dilate = cv2.dilate(frame_thresh, kernel, iterations=1)
+    frame_erode = cv2.erode(frame_dilate, kernel, iterations=1)
+
+    # Find contours ----
+    cnts, hier = cv2.findContours(frame_erode, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    if len(cnts) == 0:
+        return []
+    
+    # Filter contours and process each card
+    cards = []
+    stack = [(0, hier[0][0])]
+    while len(stack) > 0:
+        i_cnt, h = stack.pop()
+        i_next, i_prev, i_child, i_parent = h
+
+        if i_next != -1:
+            stack.append((i_next, hier[0][i_next]))
+        
+        cnt = cnts[i_cnt]
+        size = cv2.contourArea(cnt)
+        peri = cv2.arcLength(cnt, True)
+        approx = cv2.approxPolyDP(cnt, 0.04 * peri, True)
+
+        if size >= size_thresh and len(approx) == 4:
+            # Get the card image
+            pts = approx.reshape(4, 2)
+            warped = four_point_transform(frame, pts)
+            warped = remove_glare(warped)
+
+            # Compare the card image with the database
+            hash_val = ih.phash(Image.fromarray(warped), hash_size=hash_size)
+            card_name = None
+            min_dist = float('inf')
+            for name, hash_db in card_hashes.items():
+                # MAY HAVE TO BE FIXED ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                # dist = np.linalg.norm(hash_val.hash.flatten() - hash_db)
+                dist = np.linalg.norm(np.bitwise_xor(hash_val.hash.flatten(), hash_db))
+                if dist < min_dist:
+                    min_dist = dist
+                    card_name = name
+            
+            # Get the card information
+            card = Card.find(card_name)
+            cards.append(card)
+            
+            # Display the card information
+            if debug:
+                print(f"Card detected: {card_name}")
+                print(f"Name: {card.name}")
+                print(f"Set: {card.set.name}")
+                print(f"Rarity: {card.rarity}")
+                print(f"Price: {card.tcgplayer.prices.holofoil}")
+                print(f"Image: {card.images.large}")
+                print(f"API URL: {api_base_url}/{card.id}")
+            
+            # Display the card
+            if display:
+                cv2.imshow("Card", warped)
+                cv2.waitKey(0)
+
 # RestClient.configure( REDACTED API )
+
+video = cv2.VideoCapture(1)
+
+while True:
+    # Capture the video feed
+    ret, frame = video.read()
+    card_hashes = calc_image_hashes("Pokemon-TCG-Tracker/Card-Images")
+    cards = detect_frame(frame, card_hashes, 16, "https://api.pokemontcg.io/v2/cards", display=False, debug=True)
+    
+    # Open up a window called "Card Detection" and displays video
+    cv2.imshow("Card detection", frame)
+    
+    # exit button will be set to Q
+    if cv2.waitKey(1) == ord("q"):
+        break
+
+# Release the video feed and close all windows
+video.release()
+cv2.destroyAllWindows()
 
 # card = Card.find('xy1-1')
 
@@ -145,32 +322,32 @@ def remove_glare(img):
 
 # Load test pokemon card
 # '0' after the image location loads it in grayscale
-test = cv2.imread("Pokemon-TCG-Tracker/Card-Images/sv4pt5-36-Dedenne.png", 0)
-w, h = test.shape[::-1]
+# test = cv2.imread("Pokemon-TCG-Tracker/Card-Images/sv4pt5.png", 0)
+# w, h = test.shape[::-1]
 
-# Video feed, change the number for the camera
-video = cv2.VideoCapture(1)
+# # Video feed, change the number for the camera
+# video = cv2.VideoCapture(1)
 
-while True:
-    ret, frame = video.read()
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+# while True:
+#     ret, frame = video.read()
+#     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # test match
-    res = cv2.matchTemplate(gray, test, cv2.TM_CCOEFF_NORMED)
-    threshold = 0.8
-    loc = np.where(res >= threshold)
+#     # test match
+#     res = cv2.matchTemplate(gray, test, cv2.TM_CCOEFF_NORMED)
+#     threshold = 0.8
+#     loc = np.where(res >= threshold)
 
-    # Highlight the detected card
-    for pt in zip(*loc[::-1]):
-        cv2.rectangle(frame, pt, (pt[0] + w, pt[1] + h), (0, 255, 255), 2)
-        print("Card detected!")
+#     # Highlight the detected card
+#     for pt in zip(*loc[::-1]):
+#         cv2.rectangle(frame, pt, (pt[0] + w, pt[1] + h), (0, 255, 255), 2)
+#         print("Card detected!")
 
-    # Open up a window called "Card Detection" and displays video
-    cv2.imshow("Card detection", frame)
+#     # Open up a window called "Card Detection" and displays video
+#     cv2.imshow("Card detection", frame)
 
-    # exit button will be set to Q
-    if cv2.waitKey(1) == ord("q"):
-        break
+#     # exit button will be set to Q
+#     if cv2.waitKey(1) == ord("q"):
+#         break
         
-video.release()
-cv2.destroyAllWindows()
+# video.release()
+# cv2.destroyAllWindows()
