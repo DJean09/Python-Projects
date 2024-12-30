@@ -211,6 +211,21 @@ def find_card(img, thresh_c=5, kernel_size=(3,3), size_thresh=10000):
         
     return cnts_rect
 
+def display_card_info(card, api_base_url):
+    """
+    Display card information in a window.
+    [card] card object containing information
+    """
+    info_img = np.zeros((400, 600, 3), dtype=np.uint8)
+    cv2.putText(info_img, f"Name: {card.name}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(info_img, f"Set: {card.set.name}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(info_img, f"Rarity: {card.rarity}", (10, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    if card.tcgplayer and card.tcgplayer.prices and card.tcgplayer.prices.holofoil:
+        price = card.tcgplayer.prices.holofoil.market
+        cv2.putText(info_img, f"Price: ${price:.2f}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    cv2.putText(info_img, f"API URL: {api_base_url}/{card.id}", (10, 190), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    cv2.imshow("Card Information", info_img)
+
 def detect_frame(frame, card_hashes, hash_size, api_base_url, api_key=None, display=False, debug=False, thresh_c=5, kernel_size=(3,3), size_thresh=10000):
     """
     identify all the cards in the input frame
@@ -291,7 +306,8 @@ def detect_frame(frame, card_hashes, hash_size, api_base_url, api_key=None, disp
             # Display the card
             if display:
                 cv2.imshow("Card", warped)
-                cv2.waitKey(0)
+                display_card_info(card, api_base_url)
+    return cards
 
 # RestClient.configure( REDACTED API )
 
@@ -301,7 +317,7 @@ while True:
     # Capture the video feed
     ret, frame = video.read()
     card_hashes = calc_image_hashes("Pokemon-TCG-Tracker/Card-Images")
-    cards = detect_frame(frame, card_hashes, 16, "https://api.pokemontcg.io/v2/cards", display=False, debug=True)
+    cards = detect_frame(frame, card_hashes, 16, "https://api.pokemontcgio/v2/cards", display=True, debug=True)
     
     # Open up a window called "Card Detection" and displays video
     cv2.imshow("Card detection", frame)
