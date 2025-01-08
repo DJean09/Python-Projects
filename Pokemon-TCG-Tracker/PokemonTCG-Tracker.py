@@ -25,6 +25,8 @@ import time                     # returns the CPU time of the current process
 # import cvlib as cv
 # from cvlib.object_detection import draw_bbox
 
+recent = ""
+
 def calc_image_hashes(card_pool, hash_size=16):
     """
     Compare card on video with each card in the database and gives them a value
@@ -223,6 +225,8 @@ def display_card_info(card, api_base_url):
     if card.tcgplayer and card.tcgplayer.prices and card.tcgplayer.prices.holofoil:
         price = card.tcgplayer.prices.holofoil.market
         cv2.putText(info_img, f"Price: ${price:.2f}", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+    else:
+        cv2.putText(info_img, "Price: None", (10, 150), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     cv2.putText(info_img, f"API URL: {api_base_url}/{card.id}", (10, 190), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     cv2.imshow("Card Information", info_img)
 
@@ -294,38 +298,50 @@ def detect_frame(frame, card_hashes, hash_size, api_base_url, api_key=None, disp
             cards.append(card)
             
             # Display the card information
-            if debug:
-                print(f"Card detected: {card_name}")
-                print(f"Name: {card.name}")
-                print(f"Set: {card.set.name}")
-                print(f"Rarity: {card.rarity}")
-                print(f"Price: {card.tcgplayer.prices.holofoil}")
-                print(f"Image: {card.images.large}")
-                print(f"API URL: {api_base_url}/{card.id}")
+            # if debug:
+            #     print(f"Card detected: {card_name}")
+            #     print(f"Name: {card.name}")
+            #     print(f"Set: {card.set.name}")
+            #     print(f"Rarity: {card.rarity}")
+            #     print(f"Price: {card.tcgplayer.prices.holofoil}")
+            #     print(f"Image: {card.images.large}")
+            #     print(f"API URL: {api_base_url}/{card.id}")
             
-            # Display the card
+            # Draw border on detected card
+            x, y, w, h = cv2.boundingRect(approx)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+            # Display the current card
             if display:
-                cv2.imshow("Card", warped)
-                display_card_info(card, api_base_url)
+                #cv2.imshow("Card", warped)
+                global recent
+                if recent != card.id:                       # Only updates if new card
+                    display_card_info(card, api_base_url)
+                    recent = card.id
     return cards
 
-# RestClient.configure( REDACTED API )
 
-video = cv2.VideoCapture(1)
+def main():
+    # RestClient.configure( REDACTED API )
 
-while True:
-    # Capture the video feed
-    ret, frame = video.read()
-    card_hashes = calc_image_hashes("Pokemon-TCG-Tracker/Card-Images")
-    cards = detect_frame(frame, card_hashes, 16, "https://api.pokemontcgio/v2/cards", display=True, debug=True)
+    video = cv2.VideoCapture(1)
+
+    while True:
+        # Capture the video feed
+        ret, frame = video.read()
+        card_hashes = calc_image_hashes("Pokemon-TCG-Tracker/Card-Images")
+        cards = detect_frame(frame, card_hashes, 16, "https://api.pokemontcgio/v2/cards", display=True, debug=True)
     
-    # Open up a window called "Card Detection" and displays video
-    cv2.imshow("Card detection", frame)
+        # Open up a window called "Card Detection" and displays video
+        cv2.imshow("Card detection", frame)
     
-    # exit button will be set to Q
-    if cv2.waitKey(1) == ord("q"):
-        break
+        # exit button will be set to Q
+        if cv2.waitKey(1) == ord("q"):
+            break
 
-# Release the video feed and close all windows
-video.release()
-cv2.destroyAllWindows()
+    # Release the video feed and close all windows
+    video.release()
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
